@@ -1,0 +1,78 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - 'v*' # v1.0.0 などのタグがプッシュされたときに実行
+  workflow_dispatch: # GitHub Web画面から手動実行可能
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # GitHub Release 作成権限
+
+    steps:
+      # 1. リポジトリのチェックアウト
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. JDK 17 のセットアップ
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 3. Gradle のセットアップ (キャッシュ有効化)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # 4. Gradle wrapper の実行権限付与 (存在する場合)
+      - name: Grant execute permission for gradlew
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+          fi
+
+      # 5. Release APK のビルド
+      - name: Build Release APK
+        run: |
+          if [ -f "./gradlew" ]; then
+            ./gradlew assembleRelease --stacktrace
+          else
+            gradle assembleRelease --stacktrace
+          fi
+
+      # 6. APK の署名 (GitHub Secrets に署名鍵が登録されている場合)
+      - name: Sign Release APK
+        if: env.KEYSTORE_BASE64 != ''
+        uses: ralfirza/action-sign-android-apk@v1
+        with:
+          apkRootDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+      # 7. ビルド成果物の保存 (Actions 画面から直接ダウンロード可能)
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthSync-APK
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      # 8. GitHub Releases への自動公開 (タグプッシュ時のみ)
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

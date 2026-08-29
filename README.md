@@ -70,6 +70,62 @@ Android の「ヘルスコネクト（Health Connect）」から多次元の健�
 
 ---
 
+## GitHub Actions による自動 APK ビルド & リリース
+
+本リポジトリには、GitHub Actions を用いて自動で Release APK をビルド・署名・公開するワークフロー（[`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)）が設定されています。
+
+### 1. 署名用キーストアの準備 & GitHub Secrets（環境変数）の設定
+
+GitHub リポジトリに署名鍵（`.jks` / `.keystore`）を直接公開することなく、安全に自動署名を行うための手順です。
+
+#### (1) 署名用キーストアの作成（初回のみ）
+Android Studio のメニュー **「Build」→「Generate Signed Bundle / APK...」→「APK」→「Create new...」** からキーストアファイル（例: `my-release-key.jks`）を作成します。
+
+#### (2) キーストアを Base64 文字列に変換
+作成したキーストアファイルを Base64 形式のテキストに変換します。
+
+* **Windows (PowerShell)**:
+  ```powershell
+  [Convert]::ToBase64String([IO.File]::ReadAllBytes("path\to\my-release-key.jks")) | Set-Clipboard
+  ```
+  *(クリップボードに Base64 文字列がコピーされます)*
+
+* **macOS / Linux**:
+  ```bash
+  base64 -i path/to/my-release-key.jks | pbcopy
+  ```
+
+#### (3) GitHub リポジトリの Secrets に登録
+GitHub のリポジトリページを開き、**「Settings」→「Secrets and variables」→「Actions」** の **「New repository secret」** から以下の 4 つの環境変数を登録します：
+
+| Secret 名 | 内容 | 設定例 |
+| :--- | :--- | :--- |
+| **`KEYSTORE_BASE64`** | (2) で変換した Base64 テキスト | `MIIKvgIBAzCCCncGCSqGSIb...` |
+| **`KEYSTORE_PASSWORD`** | キーストア作成時に設定したパスワード | `your_keystore_password` |
+| **`KEY_ALIAS`** | 鍵のエイリアス名 | `healthsync_key` |
+| **`KEY_PASSWORD`** | 鍵作成時に設定したパスワード | `your_key_password` |
+
+---
+
+### 2. リリースの実行方法
+
+#### A. バージョンタグを打って自動公開（おすすめ）
+Git で新しいバージョンのタグを作成して Push すると、Actions が起動して APK のビルド・署名を行い、**GitHub の「Releases」ページに APK が自動添付** されます。
+
+```bash
+# 例: v1.0.0 リリース
+git tag v1.0.0
+git push origin v1.0.0
+```
+> スマホのブラウザで GitHub の Releases ページを開き、`app-release.apk` をタップするだけで直接インストール・更新できます。
+
+#### B. GitHub Web 画面からの手動ビルド
+1. リポジトリの **「Actions」** タブを開きます。
+2. 左側の **「Build & Release APK」** を選択し、**「Run workflow」** ボタンをクリックします。
+3. ビルド完了後、実行詳細画面の **「Artifacts」** から APK をダウンロードできます。
+
+---
+
 ## 技術スタック
 - **UI**: Jetpack Compose + Material 3 + Navigation
 - **SDK**: `androidx.health.connect:connect-client:1.1.0-alpha11`
