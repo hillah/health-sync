@@ -1,0 +1,305 @@
+/**
+ * HealthSync -> Google Spreadsheet Multi-Sheet Webhook Receiver (GAS Sample)
+ *
+ * このスクリプトは、Android アプリ「HealthSync」から送信される健康データ (JSON) を受信し、
+ * Google スプレッドシート内の各専用シートへ自動振り分け・記録します。
+ *
+ * 【重複防止仕様】
+ * 1. DailySummary      : 日付(yyyy-MM-dd)で照合し、同日データは最新値に上書き更新 (Upsert)
+ * 2. BloodPressureLog : 測定日時(yyyy-MM-dd HH:mm:ss)で照合し、未登録の測定のみ追記
+ * 3. NutritionLog     : 食事日時＋区分＋品名で照合し、未登録の食事のみ追記
+ */
+
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return responseJson({ status: "error", message: "No post data received" });
+    }
+
+    const contents = e.postData.contents;
+    const payload = JSON.parse(contents);
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    // 1. 日別サマリーの更新 (DailySummary)
+    updateDailySummary(ss, payload);
+
+    // 2. 血圧ログの追記 (BloodPressureLog - 測定毎)
+    if (payload.detailedRecords && payload.detailedRecords.bloodPressureRecords) {
+      appendBloodPressureLogs(ss, payload.detailedRecords.bloodPressureRecords);
+    }
+
+    // 3. 食事・栄養ログの追記 (NutritionLog - 食事毎)
+    if (payload.detailedRecords && payload.detailedRecords.nutritionRecords) {
+      appendNutritionLogs(ss, payload.detailedRecords.nutritionRecords);
+    }
+
+    return responseJson({ status: "success", message: "All sheets updated successfully" });
+  } catch (error) {
+    return responseJson({ status: "error", message: error.toString() });
+  }
+}
+
+// -------------------------------------------------------------
+// 1. 日別サマリーシート (1日1行 Upsert)
+// -------------------------------------------------------------
+function updateDailySummary(ss, payload) {
+  let sheet = ss.getSheetByName("DailySummary");
+  if (!sheet) {
+    sheet = ss.insertSheet("DailySummary");
+    sheet.appendRow([
+      "日付", "歩数", "睡眠(分)", "体重(kg)", "体脂肪率(%)", 
+      "最高血圧(最新)", "最低血圧(最新)", "平均心拍(bpm)", "安静時心拍(bpm)", "消費エネルギー(kcal)",
+      "総摂取カロリー(kcal)", "朝食(kcal)", "昼食(kcal)", "夕食(kcal)", "間食(kcal)",
+      "タンパク質(g)", "脂質(g)", "炭水化物(g)", "最終同期時刻"
+    ]);
+    sheet.setFrozenRows(1);
+  }
+
+  const s = payload.summary || {};
+  const dateStr = s.date; // "yyyy-MM-dd"
+  if (!dateStr) return;
+
+  const rowData = [
+    dateStr,
+    s.steps || 0,
+    s.sleepDurationMinutes || 0,
+    s.latestWeightKg || "",
+    s.latestBodyFatPercent || "",
+    s.latestSystolicMmHg || "",
+    s.latestDiastolicMmHg || "",
+    s.avgHeartRateBpm || "",
+    s.restingHeartRateBpm || "",
+    s.totalCaloriesKcal || 0,
+    s.dietaryEnergyKcal || 0,
+    s.breakfastCaloriesKcal || 0,
+    s.lunchCaloriesKcal || 0,
+    s.dinnerCaloriesKcal || 0,
+    s.snackCaloriesKcal || 0,
+    s.dietaryProteinGrams || 0,
+    s.dietaryFatGrams || 0,
+    s.dietaryCarbsGrams || 0,
+    new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+  ];
+
+  // getValues と getDisplayValues の両方で安全に日付マッチング
+  const lastRow = sheet.getLastRow();
+  let targetRow = -1;
+
+  if (lastRow > 1) {
+    const rawValues = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < rawValues.length; i++) {
+      const cellVal = rawValues[i][0];
+      const normalizedDate = normalizeDateString(cellVal);
+      if (normalizedDate === dateStr) {
+        targetRow = i + 2; // 1-indexed (header is row 1)
+        break;
+      }
+    }
+  }
+
+  if (targetRow > 0) {
+    sheet.getRange(targetRow, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+}
+
+// -------------------------------------------------------------
+// 2. 血圧ログシート (測定日時で重複排除して追記)
+// -------------------------------------------------------------
+function appendBloodPressureLogs(ss, bpRecords) {
+  if (!bpRecords || bpRecords.length === 0) return;
+
+  let sheet = ss.getSheetByName("BloodPressureLog");
+  if (!sheet) {
+    sheet = ss.insertSheet("BloodPressureLog");
+    sheet.appendRow(["測定日時", "最高血圧(mmHg)", "最低血圧(mmHg)", "測定姿勢", "記録アプリ"]);
+    sheet.setFrozenRows(1);
+  }
+
+  // 既存の登録日時を Set に収集 (Date型・文字列両方に対応)
+  const existingTimes = new Set();
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow > 1) {
+    const dateValues = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (let i = 0; i < dateValues.length; i++) {
+      const normalized = normalizeDateTimeString(dateValues[i][0]);
+      if (normalized) {
+        existingTimes.add(normalized);
+      }
+    }
+  }
+
+  const rowsToAppend = [];
+  for (const bp of bpRecords) {
+    const timeStr = formatIsoTime(bp.time);
+    if (timeStr && !existingTimes.has(timeStr)) {
+      rowsToAppend.push([
+        timeStr,
+        bp.systolicMmHg,
+        bp.diastolicMmHg,
+        bp.bodyPosition || "",
+        bp.sourceApp || ""
+      ]);
+      existingTimes.add(timeStr);
+    }
+  }
+
+  if (rowsToAppend.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length)
+      .setValues(rowsToAppend);
+  }
+}
+
+// -------------------------------------------------------------
+// 3. 食事・栄養ログシート (食事日時+区分+品名で重複排除して追記)
+// -------------------------------------------------------------
+function appendNutritionLogs(ss, nutritionRecords) {
+  if (!nutritionRecords || nutritionRecords.length === 0) return;
+
+  let sheet = ss.getSheetByName("NutritionLog");
+  if (!sheet) {
+    sheet = ss.insertSheet("NutritionLog");
+    sheet.appendRow([
+      "食事日時", "区分", "品名 / メモ", "エネルギー(kcal)", 
+      "タンパク質(g)", "脂質(g)", "炭水化物(g)", "記録アプリ"
+    ]);
+    sheet.setFrozenRows(1);
+  }
+
+  const existingKeys = new Set();
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow > 1) {
+    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    for (let i = 0; i < values.length; i++) {
+      const timeNorm = normalizeDateTimeString(values[i][0]);
+      const mealType = String(values[i][1]).trim();
+      const name = String(values[i][2]).trim();
+      existingKeys.add(`${timeNorm}_${mealType}_${name}`);
+    }
+  }
+
+  const rowsToAppend = [];
+  for (const n of nutritionRecords) {
+    const timeStr = formatIsoTime(n.startTime);
+    const mealTypeLabel = getMealTypeLabel(n.mealType);
+    const nameStr = (n.name || "").trim();
+    const key = `${timeStr}_${mealTypeLabel}_${nameStr}`;
+
+    if (timeStr && !existingKeys.has(key)) {
+      rowsToAppend.push([
+        timeStr,
+        mealTypeLabel,
+        nameStr,
+        n.energyKcal || 0,
+        n.proteinGrams || 0,
+        n.fatGrams || 0,
+        n.carbsGrams || 0,
+        n.sourceApp || ""
+      ]);
+      existingKeys.add(key);
+    }
+  }
+
+  if (rowsToAppend.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length)
+      .setValues(rowsToAppend);
+  }
+}
+
+// -------------------------------------------------------------
+// 日時フォーマット・正規化ヘルパー
+// -------------------------------------------------------------
+
+function formatIsoTime(isoString) {
+  if (!isoString) return "";
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return String(isoString).trim();
+    return Utilities.formatDate(d, "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss");
+  } catch (e) {
+    return String(isoString).trim();
+  }
+}
+
+function normalizeDateString(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, "Asia/Tokyo", "yyyy-MM-dd");
+  }
+  const s = String(val).trim();
+  // "2026/08/29" -> "2026-08-29"
+  return s.replace(/\//g, "-").split(" ")[0];
+}
+
+function normalizeDateTimeString(val) {
+  if (!val) return "";
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss");
+  }
+  const s = String(val).trim();
+  return s.replace(/\//g, "-");
+}
+
+function getMealTypeLabel(type) {
+  const t = String(type);
+  if (t === "1" || t.includes("BREAKFAST")) return "朝食";
+  if (t === "2" || t.includes("LUNCH")) return "昼食";
+  if (t === "3" || t.includes("DINNER")) return "夕食";
+  if (t === "4" || t.includes("SNACK")) return "間食";
+  return "その他";
+}
+
+function responseJson(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/**
+ * 【ユーティリティ】既存の重複行を一括クリーンアップする関数
+ * スクリプトエディタからこの関数を選択して「実行」すると、
+ * すでに重複してしまった行を自動で綺麗に1行に整理します。
+ */
+function cleanAllDuplicateRows() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. BloodPressureLog の重複削除 (測定日時で判定)
+  const bpSheet = ss.getSheetByName("BloodPressureLog");
+  if (bpSheet && bpSheet.getLastRow() > 2) {
+    const data = bpSheet.getDataRange().getValues();
+    const uniqueRows = [data[0]]; // ヘッダー
+    const seenTimes = new Set();
+
+    for (let i = 1; i < data.length; i++) {
+      const timeKey = normalizeDateTimeString(data[i][0]);
+      if (timeKey && !seenTimes.has(timeKey)) {
+        uniqueRows.push(data[i]);
+        seenTimes.add(timeKey);
+      }
+    }
+
+    bpSheet.clearContents();
+    bpSheet.getRange(1, 1, uniqueRows.length, uniqueRows[0].length).setValues(uniqueRows);
+  }
+
+  // 2. NutritionLog の重複削除 (食事日時+区分+品名で判定)
+  const nSheet = ss.getSheetByName("NutritionLog");
+  if (nSheet && nSheet.getLastRow() > 2) {
+    const data = nSheet.getDataRange().getValues();
+    const uniqueRows = [data[0]]; // ヘッダー
+    const seenKeys = new Set();
+
+    for (let i = 1; i < data.length; i++) {
+      const key = `${normalizeDateTimeString(data[i][0])}_${String(data[i][1]).trim()}_${String(data[i][2]).trim()}`;
+      if (!seenKeys.has(key)) {
+        uniqueRows.push(data[i]);
+        seenKeys.add(key);
+      }
+    }
+
+    nSheet.clearContents();
+    nSheet.getRange(1, 1, uniqueRows.length, uniqueRows[0].length).setValues(uniqueRows);
+  }
+}

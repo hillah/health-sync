@@ -34,7 +34,9 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getReadPermission(HeartRateRecord::class),
         HealthPermission.getReadPermission(RestingHeartRateRecord::class),
         HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
-        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class)
+        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(BloodPressureRecord::class),
+        HealthPermission.getReadPermission(NutritionRecord::class)
     )
 
     fun getSdkStatus(): Int {
@@ -144,6 +146,47 @@ class HealthConnectManager(private val context: Context) {
             Log.e("HealthConnectManager", "Error fetching resting HR for $date", e)
         }
 
+        // 5. 血圧 (最新測定値)
+        var latestSystolic: Double? = null
+        var latestDiastolic: Double? = null
+        try {
+            val bloodPressures = getBloodPressureRecords(startTime, endTime)
+            val latestBP = bloodPressures.maxByOrNull { it.time }
+            latestSystolic = latestBP?.systolic?.inMillimetersOfMercury
+            latestDiastolic = latestBP?.diastolic?.inMillimetersOfMercury
+        } catch (e: Exception) {
+            Log.e("HealthConnectManager", "Error fetching blood pressure for $date", e)
+        }
+
+        // 6. 栄養摂取 (合計値 & 食事区分別)
+        var dietaryEnergy = 0.0
+        var breakfastCal = 0.0
+        var lunchCal = 0.0
+        var dinnerCal = 0.0
+        var snackCal = 0.0
+        var dietaryProtein = 0.0
+        var dietaryFat = 0.0
+        var dietaryCarbs = 0.0
+        try {
+            val nutritionRecords = getNutritionRecords(startTime, endTime)
+            for (nr in nutritionRecords) {
+                val cal = nr.energy?.inKilocalories ?: 0.0
+                dietaryEnergy += cal
+                dietaryProtein += nr.protein?.inGrams ?: 0.0
+                dietaryFat += nr.totalFat?.inGrams ?: 0.0
+                dietaryCarbs += nr.totalCarbohydrate?.inGrams ?: 0.0
+
+                when (nr.mealType) {
+                    MealType.MEAL_TYPE_BREAKFAST, 1 -> breakfastCal += cal
+                    MealType.MEAL_TYPE_LUNCH, 2 -> lunchCal += cal
+                    MealType.MEAL_TYPE_DINNER, 3 -> dinnerCal += cal
+                    MealType.MEAL_TYPE_SNACK, 4 -> snackCal += cal
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("HealthConnectManager", "Error fetching nutrition for $date", e)
+        }
+
         return HealthSummary(
             date = date.toString(),
             steps = steps,
@@ -161,7 +204,17 @@ class HealthConnectManager(private val context: Context) {
             avgHeartRateBpm = avgHeartRate,
             minHeartRateBpm = minHeartRate,
             maxHeartRateBpm = maxHeartRate,
-            restingHeartRateBpm = restingHeartRate
+            restingHeartRateBpm = restingHeartRate,
+            latestSystolicMmHg = latestSystolic,
+            latestDiastolicMmHg = latestDiastolic,
+            dietaryEnergyKcal = dietaryEnergy,
+            breakfastCaloriesKcal = breakfastCal,
+            lunchCaloriesKcal = lunchCal,
+            dinnerCaloriesKcal = dinnerCal,
+            snackCaloriesKcal = snackCal,
+            dietaryProteinGrams = dietaryProtein,
+            dietaryFatGrams = dietaryFat,
+            dietaryCarbsGrams = dietaryCarbs
         )
     }
 
@@ -278,6 +331,38 @@ class HealthConnectManager(private val context: Context) {
         }
     }
 
+    suspend fun getBloodPressureRecords(startTime: Instant, endTime: Instant): List<BloodPressureRecord> {
+        val client = healthConnectClient ?: return emptyList()
+        return try {
+            val response = client.readRecords(
+                ReadRecordsRequest(
+                    recordType = BloodPressureRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+                )
+            )
+            response.records
+        } catch (e: Exception) {
+            Log.e("HealthConnectManager", "Error reading blood pressure", e)
+            emptyList()
+        }
+    }
+
+    suspend fun getNutritionRecords(startTime: Instant, endTime: Instant): List<NutritionRecord> {
+        val client = healthConnectClient ?: return emptyList()
+        return try {
+            val response = client.readRecords(
+                ReadRecordsRequest(
+                    recordType = NutritionRecord::class,
+                    timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+                )
+            )
+            response.records
+        } catch (e: Exception) {
+            Log.e("HealthConnectManager", "Error reading nutrition", e)
+            emptyList()
+        }
+    }
+
     /**
      * Webhook 送信用に本日分の詳細レコード一式を抽出・変換
      */
@@ -326,11 +411,37 @@ class HealthConnectManager(private val context: Context) {
             }
         }
 
+        val bpList = getBloodPressureRecords(startOfDay.minus(Duration.ofDays(7)), endOfDay).map {
+            BloodPressureItem(
+                time = isoFormatter.format(it.time),
+                systolicMmHg = it.systolic.inMillimetersOfMercury,
+                diastolicMmHg = it.diastolic.inMillimetersOfMercury,
+                bodyPosition = it.bodyPosition.toString(),
+                sourceApp = it.metadata.dataOrigin.packageName
+            )
+        }
+
+        val nutritionList = getNutritionRecords(startOfDay, endOfDay).map {
+            NutritionItem(
+                name = it.name,
+                startTime = isoFormatter.format(it.startTime),
+                endTime = isoFormatter.format(it.endTime),
+                energyKcal = it.energy?.inKilocalories ?: 0.0,
+                proteinGrams = it.protein?.inGrams ?: 0.0,
+                fatGrams = it.totalFat?.inGrams ?: 0.0,
+                carbsGrams = it.totalCarbohydrate?.inGrams ?: 0.0,
+                mealType = it.mealType.toString(),
+                sourceApp = it.metadata.dataOrigin.packageName
+            )
+        }
+
         return DetailedRecords(
             stepItems = steps,
             sleepSessions = sleep,
             weightRecords = weight,
-            heartRateSamples = hrList
+            heartRateSamples = hrList,
+            bloodPressureRecords = bpList,
+            nutritionRecords = nutritionList
         )
     }
 }

@@ -197,6 +197,48 @@ fun DashboardScreen(
                 iconColor = Color(0xFFF97316)
             )
         }
+
+        // 9. 血圧
+        item {
+            val summary = uiState.todaySummary
+            val systolic = summary?.latestSystolicMmHg
+            val diastolic = summary?.latestDiastolicMmHg
+            val bpStr = if (systolic != null && diastolic != null) {
+                "%.0f / %.0f mmHg".format(systolic, diastolic)
+            } else if (systolic != null) {
+                "%.0f mmHg (最高)".format(systolic)
+            } else {
+                "未記録"
+            }
+
+            SummaryMetricCard(
+                title = "血圧 (最新)",
+                value = bpStr,
+                icon = Icons.Default.MonitorHeart,
+                iconColor = Color(0xFF8B5CF6)
+            )
+        }
+
+        // 10. 栄養摂取
+        item {
+            val summary = uiState.todaySummary
+            val energy = summary?.dietaryEnergyKcal ?: 0.0
+            val energyStr = if (energy > 0.0) "%,d kcal".format(energy.toLong()) else "未記録"
+            val p = summary?.dietaryProteinGrams ?: 0.0
+            val f = summary?.dietaryFatGrams ?: 0.0
+            val c = summary?.dietaryCarbsGrams ?: 0.0
+            val pfcStr = if (p > 0 || f > 0 || c > 0) {
+                "P: %.1fg / F: %.1fg / C: %.1fg".format(p, f, c)
+            } else null
+
+            SummaryMetricCard(
+                title = "栄養・食事摂取",
+                value = energyStr,
+                subtitle = pfcStr,
+                icon = Icons.Default.Restaurant,
+                iconColor = Color(0xFF10B981)
+            )
+        }
     }
 }
 
