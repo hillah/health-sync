@@ -48,10 +48,19 @@ jobs:
 
       # 6. APK の署名 (GitHub Secrets に署名鍵が登録されている場合)
       - name: Sign Release APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Signing keystore secret is not configured. Skipping signing."
+            exit 0
+          fi
+
           # 1. Base64 からキーストアファイルを復元
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
 
           # 2. 最新の Android Build-Tools を自動検出
           BUILD_TOOLS_DIR=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n 1)
@@ -68,9 +77,9 @@ jobs:
           # 5. apksigner による V2/V3 署名
           $BUILD_TOOLS_DIR/apksigner sign \
             --ks "$GITHUB_WORKSPACE/release.keystore" \
-            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
-            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
-            --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD" \
             --out HealthSync-release.apk app-aligned.apk
 
           # 6. 一時キーストアの削除
