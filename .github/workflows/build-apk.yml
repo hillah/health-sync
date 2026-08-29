@@ -48,17 +48,34 @@ jobs:
 
       # 6. APK の署名 (GitHub Secrets に署名鍵が登録されている場合)
       - name: Sign Release APK
-        if: ${{ env.KEYSTORE_BASE64 != '' }}
-        uses: r0adkll/sign-android-release@v1
-        id: sign_app
-        with:
-          releaseDirectory: app/build/outputs/apk/release
-          signingKey: ${{ secrets.KEYSTORE_BASE64 }}
-          alias: ${{ secrets.KEY_ALIAS }}
-          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
-          keyPassword: ${{ secrets.KEY_PASSWORD }}
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        run: |
+          # 1. Base64 からキーストアファイルを復元
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+
+          # 2. 最新の Android Build-Tools を自動検出
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n 1)
+          echo "Using Android Build Tools: $BUILD_TOOLS_DIR"
+
+          # 3. 未署名 APK の検出
+          cd app/build/outputs/apk/release
+          SRC_APK=$(ls app-*-unsigned.apk 2>/dev/null || ls app-*.apk | head -n 1)
+          echo "Target APK: $SRC_APK"
+
+          # 4. zipalign (4バイトアラインメント調整)
+          $BUILD_TOOLS_DIR/zipalign -v -p -f 4 "$SRC_APK" app-aligned.apk
+
+          # 5. apksigner による V2/V3 署名
+          $BUILD_TOOLS_DIR/apksigner sign \
+            --ks "$GITHUB_WORKSPACE/release.keystore" \
+            --ks-key-alias "${{ secrets.KEY_ALIAS }}" \
+            --ks-pass "pass:${{ secrets.KEYSTORE_PASSWORD }}" \
+            --key-pass "pass:${{ secrets.KEY_PASSWORD }}" \
+            --out HealthSync-release.apk app-aligned.apk
+
+          # 6. 一時キーストアの削除
+          rm -f "$GITHUB_WORKSPACE/release.keystore"
+          echo "Successfully signed HealthSync-release.apk"
 
       # 7. ビルド成果物の保存 (Actions 画面から直接ダウンロード可能)
       - name: Upload Artifact
