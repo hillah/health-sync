@@ -48,11 +48,12 @@ jobs:
 
       # 6. APK の署名 (GitHub Secrets に署名鍵が登録されている場合)
       - name: Sign Release APK
-        if: env.KEYSTORE_BASE64 != ''
-        uses: ralfirza/action-sign-android-apk@v1
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        uses: r0adkll/sign-android-release@v1
+        id: sign_app
         with:
-          apkRootDirectory: app/build/outputs/apk/release
-          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          releaseDirectory: app/build/outputs/apk/release
+          signingKey: ${{ secrets.KEYSTORE_BASE64 }}
           alias: ${{ secrets.KEY_ALIAS }}
           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
           keyPassword: ${{ secrets.KEY_PASSWORD }}
