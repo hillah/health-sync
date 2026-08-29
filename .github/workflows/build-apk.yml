@@ -91,7 +91,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HealthSync-APK
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/HealthSync-release.apk
           retention-days: 14
 
       # 8. GitHub Releases への自動公開 (タグプッシュ時のみ)
@@ -99,7 +99,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: app/build/outputs/apk/release/*.apk
+          files: app/build/outputs/apk/release/HealthSync-release.apk
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
