@@ -58,6 +58,19 @@ dependencies {
     // Health Connect
     implementation(libs.androidx.health.connect)
 
+    // WorkManager
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
+
+    // OkHttp
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+
+    // Navigation
+    implementation(libs.androidx.navigation.compose)
+
     // Coroutines & Serialization
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.guava)

@@ -3,34 +3,51 @@ package com.example.healthsync
 import android.app.Application
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.records.StepsRecord
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
+import com.example.healthsync.data.model.DetailedRecords
+import com.example.healthsync.data.model.HealthSummary
+import com.example.healthsync.data.model.HealthSyncPayload
+import com.example.healthsync.data.model.SyncLogItem
+import com.example.healthsync.data.network.WebhookClient
+import com.example.healthsync.data.network.WebhookResult
+import com.example.healthsync.data.repository.AppSettings
+import com.example.healthsync.data.repository.SettingsRepository
+import com.example.healthsync.worker.WorkManagerHelper
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.time.Instant
+import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 
 data class HealthSyncUiState(
     val sdkStatus: Int = HealthConnectClient.SDK_UNAVAILABLE,
     val hasPermissions: Boolean = false,
     val isLoading: Boolean = false,
-    val todaySteps: Long? = null,
-    val stepRecords: List<StepsRecord> = emptyList(),
-    val lastSyncTime: String? = null,
-    val errorMessage: String? = null
+    val isSyncing: Boolean = false,
+    val todaySummary: HealthSummary? = null,
+    val weeklySummaries: List<HealthSummary> = emptyList(),
+    val detailedRecords: DetailedRecords? = null,
+    val lastDataFetchTime: String? = null,
+    val errorMessage: String? = null,
+    val syncFeedbackMessage: String? = null
 )
 
 class HealthSyncViewModel(application: Application) : AndroidViewModel(application) {
 
     val healthConnectManager = HealthConnectManager(application)
+    val settingsRepository = SettingsRepository(application)
+    private val webhookClient = WebhookClient()
 
     private val _uiState = MutableStateFlow(HealthSyncUiState())
     val uiState: StateFlow<HealthSyncUiState> = _uiState.asStateFlow()
+
+    val appSettings: StateFlow<AppSettings> = settingsRepository.settingsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = AppSettings()
+    )
 
     init {
         checkStatusAndPermissions()
@@ -45,7 +62,7 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
                 val hasPerms = healthConnectManager.hasAllPermissions()
                 _uiState.update { it.copy(hasPermissions = hasPerms) }
                 if (hasPerms) {
-                    fetchTodaySteps()
+                    fetchAllHealthData()
                 }
             }
         }
@@ -56,45 +73,207 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
             val hasPerms = healthConnectManager.hasAllPermissions()
             _uiState.update { it.copy(hasPermissions = hasPerms) }
             if (hasPerms) {
-                fetchTodaySteps()
+                fetchAllHealthData()
             }
         }
     }
 
-    fun fetchTodaySteps() {
+    /**
+     * 全健康データ（本日サマリー・推移・詳細レコード）を一括読み込み
+     */
+    fun fetchAllHealthData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                val totalSteps = healthConnectManager.getTodayStepsTotal()
-                
-                val now = ZonedDateTime.now()
-                val startOfDay = now.toLocalDate().atStartOfDay(now.zone).toInstant()
-                val records = healthConnectManager.getStepRecords(startOfDay, now.toInstant())
+                val today = LocalDate.now()
+                val summary = healthConnectManager.getHealthSummaryForDay(today)
+                val weekly = healthConnectManager.getDailyHealthSummaries(days = 14)
+                val detailed = healthConnectManager.getTodayDetailedRecords()
 
-                val timeStr = DateTimeFormatter.ofPattern("HH:mm:ss").format(now)
-                
-                Log.d("HealthSync", "Fetched today steps: $totalSteps, records count: ${records.size}")
-                records.forEach { record ->
-                    Log.d("HealthSync", "Record: ${record.startTime} ~ ${record.endTime} -> ${record.count} steps (source: ${record.metadata.dataOrigin.packageName})")
-                }
+                val timeStr = DateTimeFormatter.ofPattern("HH:mm:ss").format(ZonedDateTime.now())
+
+                Log.d("HealthSyncVM", "Fetched all health data. Today steps: ${summary.steps}, sleep: ${summary.sleepDurationMinutes}m")
 
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        todaySteps = totalSteps,
-                        stepRecords = records,
-                        lastSyncTime = timeStr
+                        todaySummary = summary,
+                        weeklySummaries = weekly,
+                        detailedRecords = detailed,
+                        lastDataFetchTime = timeStr
                     )
                 }
             } catch (e: Exception) {
-                Log.e("HealthSync", "Error fetching steps", e)
+                Log.e("HealthSyncVM", "Error fetching health data", e)
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = e.localizedMessage ?: "歩数の取得に失敗しました"
+                        errorMessage = e.localizedMessage ?: "健康データの取得に失敗しました"
                     )
                 }
             }
         }
+    }
+
+    /**
+     * 手動で今すぐ Webhook 送信
+     */
+    fun manualExportWebhook() {
+        viewModelScope.launch {
+            val settings = appSettings.value
+            if (settings.webhookUrl.isBlank()) {
+                _uiState.update { it.copy(errorMessage = "設定画面で Webhook URL を指定してください") }
+                return@launch
+            }
+
+            _uiState.update { it.copy(isSyncing = true, errorMessage = null) }
+
+            val now = ZonedDateTime.now()
+            val isoTimestamp = DateTimeFormatter.ISO_INSTANT.format(now.toInstant())
+            val logTimeStr = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss").format(now)
+
+            try {
+                val summary = uiState.value.todaySummary ?: healthConnectManager.getHealthSummaryForDay(LocalDate.now())
+                val detailed = if (settings.includeDetailedRecords) {
+                    uiState.value.detailedRecords ?: healthConnectManager.getTodayDetailedRecords()
+                } else {
+                    null
+                }
+
+                val payload = HealthSyncPayload(
+                    timestamp = isoTimestamp,
+                    deviceId = android.os.Build.MODEL,
+                    syncType = "MANUAL",
+                    summary = summary,
+                    detailedRecords = detailed
+                )
+
+                val result = webhookClient.sendPayload(
+                    url = settings.webhookUrl,
+                    payload = payload,
+                    customHeaderName = settings.customHeaderName,
+                    customHeaderValue = settings.customHeaderValue
+                )
+
+                when (result) {
+                    is WebhookResult.Success -> {
+                        val log = SyncLogItem(
+                            id = UUID.randomUUID().toString(),
+                            timestamp = logTimeStr,
+                            isSuccess = true,
+                            syncType = "手動即時同期",
+                            statusCode = result.statusCode,
+                            message = "送信成功 (HTTP ${result.statusCode})",
+                            recordsCountSummary = "歩数: ${summary.steps}, 睡眠: ${summary.sleepDurationMinutes}分"
+                        )
+                        settingsRepository.addSyncLog(log)
+                        _uiState.update { it.copy(isSyncing = false, syncFeedbackMessage = "Webhookへの送信が完了しました") }
+                    }
+                    is WebhookResult.Failure -> {
+                        val log = SyncLogItem(
+                            id = UUID.randomUUID().toString(),
+                            timestamp = logTimeStr,
+                            isSuccess = false,
+                            syncType = "手動即時同期",
+                            statusCode = result.statusCode,
+                            message = result.errorMessage,
+                            recordsCountSummary = "送信失敗"
+                        )
+                        settingsRepository.addSyncLog(log)
+                        _uiState.update { it.copy(isSyncing = false, errorMessage = "送信失敗: ${result.errorMessage}") }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("HealthSyncVM", "Manual export error", e)
+                _uiState.update { it.copy(isSyncing = false, errorMessage = "送信エラー: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    /**
+     * Webhook 設定のテスト送信
+     */
+    fun testWebhook(url: String, headerName: String, headerValue: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true, errorMessage = null) }
+            val now = ZonedDateTime.now()
+            val isoTimestamp = DateTimeFormatter.ISO_INSTANT.format(now.toInstant())
+            val logTimeStr = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss").format(now)
+
+            val testSummary = uiState.value.todaySummary ?: HealthSummary(date = LocalDate.now().toString(), steps = 7777L)
+
+            val payload = HealthSyncPayload(
+                timestamp = isoTimestamp,
+                deviceId = android.os.Build.MODEL,
+                syncType = "TEST_PING",
+                summary = testSummary
+            )
+
+            val result = webhookClient.sendPayload(
+                url = url,
+                payload = payload,
+                customHeaderName = headerName,
+                customHeaderValue = headerValue
+            )
+
+            when (result) {
+                is WebhookResult.Success -> {
+                    val log = SyncLogItem(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = logTimeStr,
+                        isSuccess = true,
+                        syncType = "テスト送信",
+                        statusCode = result.statusCode,
+                        message = "テスト送信成功 (HTTP ${result.statusCode})",
+                        recordsCountSummary = "疎通確認OK"
+                    )
+                    settingsRepository.addSyncLog(log)
+                    _uiState.update { it.copy(isSyncing = false, syncFeedbackMessage = "テスト送信に成功しました！(HTTP ${result.statusCode})") }
+                }
+                is WebhookResult.Failure -> {
+                    val log = SyncLogItem(
+                        id = UUID.randomUUID().toString(),
+                        timestamp = logTimeStr,
+                        isSuccess = false,
+                        syncType = "テスト送信",
+                        statusCode = result.statusCode,
+                        message = result.errorMessage,
+                        recordsCountSummary = "疎通エラー"
+                    )
+                    settingsRepository.addSyncLog(log)
+                    _uiState.update { it.copy(isSyncing = false, errorMessage = "テスト送信失敗: ${result.errorMessage}") }
+                }
+            }
+        }
+    }
+
+    fun saveWebhookSettings(url: String, headerName: String, headerValue: String) {
+        viewModelScope.launch {
+            settingsRepository.updateWebhookSettings(url, headerName, headerValue)
+            _uiState.update { it.copy(syncFeedbackMessage = "Webhook設定を保存しました") }
+        }
+    }
+
+    fun saveScheduleSettings(intervalHours: Long, isAutoSync: Boolean, includeDetailed: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.updateSyncScheduleSettings(intervalHours, isAutoSync, includeDetailed)
+            // WorkManager スケジュールを更新
+            WorkManagerHelper.updatePeriodicSync(
+                context = getApplication(),
+                intervalHours = intervalHours,
+                isEnabled = isAutoSync
+            )
+            _uiState.update { it.copy(syncFeedbackMessage = "同期スケジュールを更新しました") }
+        }
+    }
+
+    fun clearLogs() {
+        viewModelScope.launch {
+            settingsRepository.clearLogs()
+        }
+    }
+
+    fun clearFeedbackMessage() {
+        _uiState.update { it.copy(syncFeedbackMessage = null) }
     }
 }
