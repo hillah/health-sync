@@ -26,7 +26,7 @@ class HealthConnectManager(private val context: Context) {
         }
     }
 
-    val permissions = setOf(
+    val basePermissions = setOf(
         HealthPermission.getReadPermission(StepsRecord::class),
         HealthPermission.getReadPermission(SleepSessionRecord::class),
         HealthPermission.getReadPermission(WeightRecord::class),
@@ -38,6 +38,28 @@ class HealthConnectManager(private val context: Context) {
         HealthPermission.getReadPermission(BloodPressureRecord::class),
         HealthPermission.getReadPermission(NutritionRecord::class)
     )
+
+    @OptIn(androidx.health.connect.client.feature.ExperimentalFeatureAvailabilityApi::class)
+    val permissions: Set<String>
+        get() {
+            val client = healthConnectClient ?: return basePermissions
+            val perms = basePermissions.toMutableSet()
+            try {
+                if (client.features.getFeatureStatus(androidx.health.connect.client.HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_IN_BACKGROUND) == androidx.health.connect.client.HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) {
+                    perms.add(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND)
+                }
+            } catch (e: Exception) {
+                Log.w("HealthConnectManager", "Error checking FEATURE_READ_HEALTH_DATA_IN_BACKGROUND", e)
+            }
+            try {
+                if (client.features.getFeatureStatus(androidx.health.connect.client.HealthConnectFeatures.FEATURE_READ_HEALTH_DATA_HISTORY) == androidx.health.connect.client.HealthConnectFeatures.FEATURE_STATUS_AVAILABLE) {
+                    perms.add(HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY)
+                }
+            } catch (e: Exception) {
+                Log.w("HealthConnectManager", "Error checking FEATURE_READ_HEALTH_DATA_HISTORY", e)
+            }
+            return perms
+        }
 
     fun getSdkStatus(): Int {
         return HealthConnectClient.getSdkStatus(context)
@@ -158,7 +180,7 @@ class HealthConnectManager(private val context: Context) {
             Log.e("HealthConnectManager", "Error fetching blood pressure for $date", e)
         }
 
-        // 6. 栄養摂取 (合計値 & 食事区分別)
+        // 6. 栄養摂取 (合計値 & 食事区分別 & 詳細栄養素)
         var dietaryEnergy = 0.0
         var breakfastCal = 0.0
         var lunchCal = 0.0
@@ -167,6 +189,39 @@ class HealthConnectManager(private val context: Context) {
         var dietaryProtein = 0.0
         var dietaryFat = 0.0
         var dietaryCarbs = 0.0
+        var dietaryFiber = 0.0
+        var sugar = 0.0
+        var saturatedFat = 0.0
+        var transFat = 0.0
+        var cholesterol = 0.0
+        var sodium = 0.0
+        var potassium = 0.0
+        var calcium = 0.0
+        var iron = 0.0
+        var zinc = 0.0
+        var magnesium = 0.0
+        var vitaminA = 0.0
+        var vitaminD = 0.0
+        var vitaminE = 0.0
+        var vitaminK = 0.0
+        var vitaminB1 = 0.0
+        var vitaminB2 = 0.0
+        var vitaminB6 = 0.0
+        var vitaminB12 = 0.0
+        var niacin = 0.0
+        var folate = 0.0
+        var pantothenicAcid = 0.0
+        var biotin = 0.0
+        var vitaminC = 0.0
+        var caffeine = 0.0
+        var phosphorus = 0.0
+        var copper = 0.0
+        var manganese = 0.0
+        var selenium = 0.0
+        var iodine = 0.0
+        var chromium = 0.0
+        var molybdenum = 0.0
+
         try {
             val nutritionRecords = getNutritionRecords(startTime, endTime)
             for (nr in nutritionRecords) {
@@ -175,6 +230,38 @@ class HealthConnectManager(private val context: Context) {
                 dietaryProtein += nr.protein?.inGrams ?: 0.0
                 dietaryFat += nr.totalFat?.inGrams ?: 0.0
                 dietaryCarbs += nr.totalCarbohydrate?.inGrams ?: 0.0
+                dietaryFiber += nr.dietaryFiber?.inGrams ?: 0.0
+                sugar += nr.sugar?.inGrams ?: 0.0
+                saturatedFat += nr.saturatedFat?.inGrams ?: 0.0
+                transFat += nr.transFat?.inGrams ?: 0.0
+                cholesterol += nr.cholesterol?.inMilligrams ?: 0.0
+                sodium += nr.sodium?.inMilligrams ?: 0.0
+                potassium += nr.potassium?.inMilligrams ?: 0.0
+                calcium += nr.calcium?.inMilligrams ?: 0.0
+                iron += nr.iron?.inMilligrams ?: 0.0
+                zinc += nr.zinc?.inMilligrams ?: 0.0
+                magnesium += nr.magnesium?.inMilligrams ?: 0.0
+                vitaminA += nr.vitaminA?.inMicrograms ?: 0.0
+                vitaminD += nr.vitaminD?.inMicrograms ?: 0.0
+                vitaminE += nr.vitaminE?.inMilligrams ?: 0.0
+                vitaminK += nr.vitaminK?.inMicrograms ?: 0.0
+                vitaminB1 += nr.thiamin?.inMilligrams ?: 0.0
+                vitaminB2 += nr.riboflavin?.inMilligrams ?: 0.0
+                vitaminB6 += nr.vitaminB6?.inMilligrams ?: 0.0
+                vitaminB12 += nr.vitaminB12?.inMicrograms ?: 0.0
+                niacin += nr.niacin?.inMilligrams ?: 0.0
+                folate += nr.folate?.inMicrograms ?: 0.0
+                pantothenicAcid += nr.pantothenicAcid?.inMilligrams ?: 0.0
+                biotin += nr.biotin?.inMicrograms ?: 0.0
+                vitaminC += nr.vitaminC?.inMilligrams ?: 0.0
+                caffeine += nr.caffeine?.inMilligrams ?: 0.0
+                phosphorus += nr.phosphorus?.inMilligrams ?: 0.0
+                copper += nr.copper?.inMilligrams ?: 0.0
+                manganese += nr.manganese?.inMilligrams ?: 0.0
+                selenium += nr.selenium?.inMicrograms ?: 0.0
+                iodine += nr.iodine?.inMicrograms ?: 0.0
+                chromium += nr.chromium?.inMicrograms ?: 0.0
+                molybdenum += nr.molybdenum?.inMicrograms ?: 0.0
 
                 when (nr.mealType) {
                     MealType.MEAL_TYPE_BREAKFAST, 1 -> breakfastCal += cal
@@ -186,6 +273,8 @@ class HealthConnectManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("HealthConnectManager", "Error fetching nutrition for $date", e)
         }
+
+        val saltGrams = sodium * 2.54 / 1000.0
 
         return HealthSummary(
             date = date.toString(),
@@ -214,7 +303,40 @@ class HealthConnectManager(private val context: Context) {
             snackCaloriesKcal = snackCal,
             dietaryProteinGrams = dietaryProtein,
             dietaryFatGrams = dietaryFat,
-            dietaryCarbsGrams = dietaryCarbs
+            dietaryCarbsGrams = dietaryCarbs,
+            dietaryFiberGrams = dietaryFiber,
+            sugarGrams = sugar,
+            saturatedFatGrams = saturatedFat,
+            transFatGrams = transFat,
+            cholesterolMg = cholesterol,
+            sodiumMg = sodium,
+            saltGrams = saltGrams,
+            potassiumMg = potassium,
+            calciumMg = calcium,
+            ironMg = iron,
+            zincMg = zinc,
+            magnesiumMg = magnesium,
+            vitaminAMcg = vitaminA,
+            vitaminDMcg = vitaminD,
+            vitaminEMg = vitaminE,
+            vitaminKMcg = vitaminK,
+            vitaminB1Mg = vitaminB1,
+            vitaminB2Mg = vitaminB2,
+            vitaminB6Mg = vitaminB6,
+            vitaminB12Mcg = vitaminB12,
+            niacinMg = niacin,
+            folateMcg = folate,
+            pantothenicAcidMg = pantothenicAcid,
+            biotinMcg = biotin,
+            vitaminCMg = vitaminC,
+            caffeineMg = caffeine,
+            phosphorusMg = phosphorus,
+            copperMg = copper,
+            manganeseMg = manganese,
+            seleniumMcg = selenium,
+            iodineMcg = iodine,
+            chromiumMcg = chromium,
+            molybdenumMcg = molybdenum
         )
     }
 
@@ -421,17 +543,56 @@ class HealthConnectManager(private val context: Context) {
             )
         }
 
-        val nutritionList = getNutritionRecords(startOfDay, endOfDay).map {
-            NutritionItem(
-                name = it.name,
-                startTime = isoFormatter.format(it.startTime),
-                endTime = isoFormatter.format(it.endTime),
+        val nutritionList = getNutritionRecords(startOfDay.minus(Duration.ofDays(7)), endOfDay)
+            .distinctBy { it.metadata.id }
+            .map {
+                val sodiumMg = it.sodium?.inMilligrams ?: 0.0
+                val saltGrams = sodiumMg * 2.54 / 1000.0
+
+                NutritionItem(
+                    recordId = it.metadata.id,
+                    name = it.name,
+                    startTime = isoFormatter.format(it.startTime),
+                    endTime = isoFormatter.format(it.endTime),
                 energyKcal = it.energy?.inKilocalories ?: 0.0,
                 proteinGrams = it.protein?.inGrams ?: 0.0,
                 fatGrams = it.totalFat?.inGrams ?: 0.0,
                 carbsGrams = it.totalCarbohydrate?.inGrams ?: 0.0,
                 mealType = it.mealType.toString(),
-                sourceApp = it.metadata.dataOrigin.packageName
+                sourceApp = it.metadata.dataOrigin.packageName,
+                dietaryFiberGrams = it.dietaryFiber?.inGrams ?: 0.0,
+                sugarGrams = it.sugar?.inGrams ?: 0.0,
+                saturatedFatGrams = it.saturatedFat?.inGrams ?: 0.0,
+                transFatGrams = it.transFat?.inGrams ?: 0.0,
+                cholesterolMg = it.cholesterol?.inMilligrams ?: 0.0,
+                sodiumMg = sodiumMg,
+                saltGrams = saltGrams,
+                potassiumMg = it.potassium?.inMilligrams ?: 0.0,
+                calciumMg = it.calcium?.inMilligrams ?: 0.0,
+                ironMg = it.iron?.inMilligrams ?: 0.0,
+                zincMg = it.zinc?.inMilligrams ?: 0.0,
+                magnesiumMg = it.magnesium?.inMilligrams ?: 0.0,
+                vitaminAMcg = it.vitaminA?.inMicrograms ?: 0.0,
+                vitaminDMcg = it.vitaminD?.inMicrograms ?: 0.0,
+                vitaminEMg = it.vitaminE?.inMilligrams ?: 0.0,
+                vitaminKMcg = it.vitaminK?.inMicrograms ?: 0.0,
+                vitaminB1Mg = it.thiamin?.inMilligrams ?: 0.0,
+                vitaminB2Mg = it.riboflavin?.inMilligrams ?: 0.0,
+                vitaminB6Mg = it.vitaminB6?.inMilligrams ?: 0.0,
+                vitaminB12Mcg = it.vitaminB12?.inMicrograms ?: 0.0,
+                niacinMg = it.niacin?.inMilligrams ?: 0.0,
+                folateMcg = it.folate?.inMicrograms ?: 0.0,
+                pantothenicAcidMg = it.pantothenicAcid?.inMilligrams ?: 0.0,
+                biotinMcg = it.biotin?.inMicrograms ?: 0.0,
+                vitaminCMg = it.vitaminC?.inMilligrams ?: 0.0,
+                caffeineMg = it.caffeine?.inMilligrams ?: 0.0,
+                phosphorusMg = it.phosphorus?.inMilligrams ?: 0.0,
+                copperMg = it.copper?.inMilligrams ?: 0.0,
+                manganeseMg = it.manganese?.inMilligrams ?: 0.0,
+                seleniumMcg = it.selenium?.inMicrograms ?: 0.0,
+                iodineMcg = it.iodine?.inMicrograms ?: 0.0,
+                chromiumMcg = it.chromium?.inMicrograms ?: 0.0,
+                molybdenumMcg = it.molybdenum?.inMicrograms ?: 0.0
             )
         }
 

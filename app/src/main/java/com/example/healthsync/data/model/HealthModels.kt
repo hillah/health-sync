@@ -32,7 +32,40 @@ data class HealthSummary(
     val snackCaloriesKcal: Double = 0.0,     // 間食 (kcal)
     val dietaryProteinGrams: Double = 0.0,   // タンパク質 (g)
     val dietaryFatGrams: Double = 0.0,       // 脂質 (g)
-    val dietaryCarbsGrams: Double = 0.0      // 炭水化物 (g)
+    val dietaryCarbsGrams: Double = 0.0,     // 炭水化物 (g)
+    val dietaryFiberGrams: Double = 0.0,     // 食物繊維 (g)
+    val sugarGrams: Double = 0.0,            // 糖質 (g)
+    val saturatedFatGrams: Double = 0.0,     // 飽和脂肪酸 (g)
+    val transFatGrams: Double = 0.0,         // トランス脂肪酸 (g)
+    val cholesterolMg: Double = 0.0,         // コレステロール (mg)
+    val sodiumMg: Double = 0.0,              // ナトリウム (mg)
+    val saltGrams: Double = 0.0,             // 食塩相当量 (g)
+    val potassiumMg: Double = 0.0,           // カリウム (mg)
+    val calciumMg: Double = 0.0,             // カルシウム (mg)
+    val ironMg: Double = 0.0,                // 鉄分 (mg)
+    val zincMg: Double = 0.0,                // 亜鉛 (mg)
+    val magnesiumMg: Double = 0.0,           // マグネシウム (mg)
+    val vitaminAMcg: Double = 0.0,           // ビタミンA (μg)
+    val vitaminDMcg: Double = 0.0,           // ビタミンD (μg)
+    val vitaminEMg: Double = 0.0,            // ビタミンE (mg)
+    val vitaminKMcg: Double = 0.0,           // ビタミンK (μg)
+    val vitaminB1Mg: Double = 0.0,           // ビタミンB1 / チアミン (mg)
+    val vitaminB2Mg: Double = 0.0,           // ビタミンB2 / リボフラビン (mg)
+    val vitaminB6Mg: Double = 0.0,           // ビタミンB6 (mg)
+    val vitaminB12Mcg: Double = 0.0,         // ビタミンB12 (μg)
+    val niacinMg: Double = 0.0,              // ナイアシン (mg)
+    val folateMcg: Double = 0.0,             // 葉酸 (μg)
+    val pantothenicAcidMg: Double = 0.0,     // パントテン酸 (mg)
+    val biotinMcg: Double = 0.0,             // ビオチン (μg)
+    val vitaminCMg: Double = 0.0,            // ビタミンC (mg)
+    val caffeineMg: Double = 0.0,            // カフェイン (mg)
+    val phosphorusMg: Double = 0.0,          // リン (mg)
+    val copperMg: Double = 0.0,              // 銅 (mg)
+    val manganeseMg: Double = 0.0,           // マンガン (mg)
+    val seleniumMcg: Double = 0.0,           // セレン (μg)
+    val iodineMcg: Double = 0.0,             // ヨウ素 (μg)
+    val chromiumMcg: Double = 0.0,           // クロム (μg)
+    val molybdenumMcg: Double = 0.0          // モリブデン (μg)
 )
 
 @Serializable
@@ -84,6 +117,7 @@ data class BloodPressureItem(
 
 @Serializable
 data class NutritionItem(
+    val recordId: String? = null,
     val name: String? = null,
     val startTime: String,
     val endTime: String,
@@ -92,7 +126,41 @@ data class NutritionItem(
     val fatGrams: Double = 0.0,
     val carbsGrams: Double = 0.0,
     val mealType: String? = null,
-    val sourceApp: String
+    val sourceApp: String,
+    // 詳細栄養素
+    val dietaryFiberGrams: Double = 0.0,     // 食物繊維 (g)
+    val sugarGrams: Double = 0.0,            // 糖質 (g)
+    val saturatedFatGrams: Double = 0.0,     // 飽和脂肪酸 (g)
+    val transFatGrams: Double = 0.0,         // トランス脂肪酸 (g)
+    val cholesterolMg: Double = 0.0,         // コレステロール (mg)
+    val sodiumMg: Double = 0.0,              // ナトリウム (mg)
+    val saltGrams: Double = 0.0,             // 食塩相当量 (g)
+    val potassiumMg: Double = 0.0,           // カリウム (mg)
+    val calciumMg: Double = 0.0,             // カルシウム (mg)
+    val ironMg: Double = 0.0,                // 鉄分 (mg)
+    val zincMg: Double = 0.0,                // 亜鉛 (mg)
+    val magnesiumMg: Double = 0.0,           // マグネシウム (mg)
+    val vitaminAMcg: Double = 0.0,           // ビタミンA (μg)
+    val vitaminDMcg: Double = 0.0,           // ビタミンD (μg)
+    val vitaminEMg: Double = 0.0,            // ビタミンE (mg)
+    val vitaminKMcg: Double = 0.0,           // ビタミンK (μg)
+    val vitaminB1Mg: Double = 0.0,           // ビタミンB1 / チアミン (mg)
+    val vitaminB2Mg: Double = 0.0,           // ビタミンB2 / リボフラビン (mg)
+    val vitaminB6Mg: Double = 0.0,           // ビタミンB6 (mg)
+    val vitaminB12Mcg: Double = 0.0,         // ビタミンB12 (μg)
+    val niacinMg: Double = 0.0,              // ナイアシン (mg)
+    val folateMcg: Double = 0.0,             // 葉酸 (μg)
+    val pantothenicAcidMg: Double = 0.0,     // パントテン酸 (mg)
+    val biotinMcg: Double = 0.0,             // ビオチン (μg)
+    val vitaminCMg: Double = 0.0,            // ビタミンC (mg)
+    val caffeineMg: Double = 0.0,            // カフェイン (mg)
+    val phosphorusMg: Double = 0.0,          // リン (mg)
+    val copperMg: Double = 0.0,              // 銅 (mg)
+    val manganeseMg: Double = 0.0,           // マンガン (mg)
+    val seleniumMcg: Double = 0.0,           // セレン (μg)
+    val iodineMcg: Double = 0.0,             // ヨウ素 (μg)
+    val chromiumMcg: Double = 0.0,           // クロム (μg)
+    val molybdenumMcg: Double = 0.0          // モリブデン (μg)
 )
 
 /**
@@ -104,6 +172,7 @@ data class HealthSyncPayload(
     val deviceId: String? = null,
     val syncType: String,               // "MANUAL" or "BACKGROUND_WORKER"
     val summary: HealthSummary,
+    val recentSummaries: List<HealthSummary> = emptyList(), // 直近過去分サマリー（最大7日）
     val detailedRecords: DetailedRecords? = null
 )
 

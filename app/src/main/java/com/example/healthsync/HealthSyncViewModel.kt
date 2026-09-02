@@ -133,9 +133,11 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
             val logTimeStr = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss").format(now)
 
             try {
-                val summary = uiState.value.todaySummary ?: healthConnectManager.getHealthSummaryForDay(LocalDate.now())
+                val today = LocalDate.now()
+                val summary = healthConnectManager.getHealthSummaryForDay(today)
+                val recentSummaries = healthConnectManager.getDailyHealthSummaries(days = 7)
                 val detailed = if (settings.includeDetailedRecords) {
-                    uiState.value.detailedRecords ?: healthConnectManager.getTodayDetailedRecords()
+                    healthConnectManager.getTodayDetailedRecords()
                 } else {
                     null
                 }
@@ -145,6 +147,7 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
                     deviceId = android.os.Build.MODEL,
                     syncType = "MANUAL",
                     summary = summary,
+                    recentSummaries = recentSummaries,
                     detailedRecords = detailed
                 )
 

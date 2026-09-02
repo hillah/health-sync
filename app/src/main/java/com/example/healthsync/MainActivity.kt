@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.health.connect.client.PermissionController
-import com.example.healthsync.ui.screens.ChartsScreen
 import com.example.healthsync.ui.screens.DashboardScreen
 import com.example.healthsync.ui.screens.SettingsScreen
 import com.example.healthsync.ui.theme.HealthSyncTheme
@@ -21,7 +20,6 @@ import kotlinx.coroutines.launch
 
 enum class MainTab(val title: String) {
     DASHBOARD("ダッシュボード"),
-    CHARTS("推移グラフ"),
     SETTINGS("設定・同期")
 }
 
@@ -95,12 +93,6 @@ class MainActivity : ComponentActivity() {
                                 label = { Text(MainTab.DASHBOARD.title) }
                             )
                             NavigationBarItem(
-                                selected = selectedTab == MainTab.CHARTS,
-                                onClick = { selectedTab = MainTab.CHARTS },
-                                icon = { Icon(Icons.Default.ShowChart, contentDescription = null) },
-                                label = { Text(MainTab.CHARTS.title) }
-                            )
-                            NavigationBarItem(
                                 selected = selectedTab == MainTab.SETTINGS,
                                 onClick = { selectedTab = MainTab.SETTINGS },
                                 icon = { Icon(Icons.Default.Settings, contentDescription = null) },
@@ -125,11 +117,6 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onRefresh = { viewModel.fetchAllHealthData() },
                                     onManualSync = { viewModel.manualExportWebhook() }
-                                )
-                            }
-                            MainTab.CHARTS -> {
-                                ChartsScreen(
-                                    uiState = uiState
                                 )
                             }
                             MainTab.SETTINGS -> {

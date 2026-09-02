@@ -4,11 +4,39 @@
  * このスクリプトは、Android アプリ「HealthSync」から送信される健康データ (JSON) を受信し、
  * Google スプレッドシート内の各専用シートへ自動振り分け・記録します。
  *
- * 【重複防止仕様】
- * 1. DailySummary      : 日付(yyyy-MM-dd)で照合し、同日データは最新値に上書き更新 (Upsert)
+ * 【シート仕様】
+ * 1. DailySummary      : 日付ごとの総括データ（カロリー・PFC・歩数・睡眠・体重・血圧等）。
+ *                        直近7日分のサマリーを受信し、過去日も含めて最新値に安全更新 (Upsert)
  * 2. BloodPressureLog : 測定日時(yyyy-MM-dd HH:mm:ss)で照合し、未登録の測定のみ追記
- * 3. NutritionLog     : 食事日時＋区分＋品名で照合し、未登録の食事のみ追記
+ * 3. NutritionLog     : 食事ごとの詳細栄養素（ビタミン・ミネラル・食物繊維等）。
+ *                        直近7日分を「洗い替え（置換）」することで重複を完全撲滅＆過去分修正も反映
  */
+
+// 1. DailySummary: カロリーとPFCおよびバイタルに絞った 19 列構成
+const DAILY_SUMMARY_HEADERS = [
+  "日付", "歩数", "睡眠(分)", "体重(kg)", "体脂肪率(%)", 
+  "最高血圧(最新)", "最低血圧(最新)", "平均心拍(bpm)", "安静時心拍(bpm)", "消費エネルギー(kcal)",
+  "総摂取カロリー(kcal)", "朝食(kcal)", "昼食(kcal)", "夕食(kcal)", "間食(kcal)",
+  "タンパク質(g)", "脂質(g)", "炭水化物(g)", "最終同期時刻"
+];
+
+// 2. BloodPressureLog: 測定毎ログ
+const BLOOD_PRESSURE_HEADERS = [
+  "測定日時", "最高血圧(mmHg)", "最低血圧(mmHg)", "測定姿勢", "記録アプリ"
+];
+
+// 3. NutritionLog: 食事毎の詳細栄養素ログ（35列）
+const NUTRITION_LOG_HEADERS = [
+  "食事日時", "区分", "品名 / メモ", "エネルギー(kcal)", 
+  "タンパク質(g)", "脂質(g)", "炭水化物(g)",
+  "食物繊維(g)", "糖質(g)", "食塩相当量(g)", "ナトリウム(mg)",
+  "カリウム(mg)", "カルシウム(mg)", "マグネシウム(mg)", "鉄(mg)", "亜鉛(mg)",
+  "ビタミンA(μg)", "ビタミンD(μg)", "ビタミンE(mg)", "ビタミンK(μg)",
+  "ビタミンB1(mg)", "ビタミンB2(mg)", "ビタミンB6(mg)", "ビタミンB12(μg)",
+  "葉酸(μg)", "ナイアシン(mg)", "パントテン酸(mg)", "ビオチン(μg)", "ビタミンC(mg)",
+  "飽和脂肪酸(g)", "トランス脂肪酸(g)", "コレステロール(mg)", "カフェイン(mg)",
+  "記録アプリ", "RecordId"
+];
 
 function doPost(e) {
   try {
@@ -21,16 +49,23 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
     // 1. 日別サマリーの更新 (DailySummary)
-    updateDailySummary(ss, payload);
+    // 直近7日分のサマリーがある場合はすべての日付を Upsert
+    if (payload.recentSummaries && payload.recentSummaries.length > 0) {
+      for (const s of payload.recentSummaries) {
+        updateDailySummary(ss, s);
+      }
+    } else if (payload.summary) {
+      updateDailySummary(ss, payload.summary);
+    }
 
     // 2. 血圧ログの追記 (BloodPressureLog - 測定毎)
     if (payload.detailedRecords && payload.detailedRecords.bloodPressureRecords) {
       appendBloodPressureLogs(ss, payload.detailedRecords.bloodPressureRecords);
     }
 
-    // 3. 食事・栄養ログの追記 (NutritionLog - 食事毎)
+    // 3. 食事・栄養ログの洗い替え更新 (NutritionLog - 直近同期期間の置換洗い替え)
     if (payload.detailedRecords && payload.detailedRecords.nutritionRecords) {
-      appendNutritionLogs(ss, payload.detailedRecords.nutritionRecords);
+      syncNutritionLogs(ss, payload.detailedRecords.nutritionRecords);
     }
 
     return responseJson({ status: "success", message: "All sheets updated successfully" });
@@ -40,22 +75,17 @@ function doPost(e) {
 }
 
 // -------------------------------------------------------------
-// 1. 日別サマリーシート (1日1行 Upsert)
+// 1. 日別サマリーシート (カロリー & PFC のみ / 1日1行 Upsert)
 // -------------------------------------------------------------
-function updateDailySummary(ss, payload) {
+function updateDailySummary(ss, summary) {
   let sheet = ss.getSheetByName("DailySummary");
   if (!sheet) {
     sheet = ss.insertSheet("DailySummary");
-    sheet.appendRow([
-      "日付", "歩数", "睡眠(分)", "体重(kg)", "体脂肪率(%)", 
-      "最高血圧(最新)", "最低血圧(最新)", "平均心拍(bpm)", "安静時心拍(bpm)", "消費エネルギー(kcal)",
-      "総摂取カロリー(kcal)", "朝食(kcal)", "昼食(kcal)", "夕食(kcal)", "間食(kcal)",
-      "タンパク質(g)", "脂質(g)", "炭水化物(g)", "最終同期時刻"
-    ]);
-    sheet.setFrozenRows(1);
   }
+  // 19列構成へ維持・マイグレーション（以前の43列を自動縮小）
+  migrateDailySummaryHeader(sheet);
 
-  const s = payload.summary || {};
+  const s = summary || {};
   const dateStr = s.date; // "yyyy-MM-dd"
   if (!dateStr) return;
 
@@ -81,7 +111,6 @@ function updateDailySummary(ss, payload) {
     new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
   ];
 
-  // getValues と getDisplayValues の両方で安全に日付マッチング
   const lastRow = sheet.getLastRow();
   let targetRow = -1;
 
@@ -91,7 +120,7 @@ function updateDailySummary(ss, payload) {
       const cellVal = rawValues[i][0];
       const normalizedDate = normalizeDateString(cellVal);
       if (normalizedDate === dateStr) {
-        targetRow = i + 2; // 1-indexed (header is row 1)
+        targetRow = i + 2;
         break;
       }
     }
@@ -102,6 +131,28 @@ function updateDailySummary(ss, payload) {
   } else {
     sheet.appendRow(rowData);
   }
+
+  // 日付昇順で整列
+  if (sheet.getLastRow() > 2) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, DAILY_SUMMARY_HEADERS.length)
+      .sort({ column: 1, ascending: true });
+  }
+}
+
+function migrateDailySummaryHeader(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) {
+    sheet.appendRow(DAILY_SUMMARY_HEADERS);
+    sheet.setFrozenRows(1);
+    return;
+  }
+  const lastCol = sheet.getLastColumn();
+  // 以前の43列など余剰列がある場合は安全に削除して19列に戻す
+  if (lastCol > DAILY_SUMMARY_HEADERS.length) {
+    sheet.deleteColumns(DAILY_SUMMARY_HEADERS.length + 1, lastCol - DAILY_SUMMARY_HEADERS.length);
+  }
+  sheet.getRange(1, 1, 1, DAILY_SUMMARY_HEADERS.length).setValues([DAILY_SUMMARY_HEADERS]);
+  sheet.setFrozenRows(1);
 }
 
 // -------------------------------------------------------------
@@ -113,11 +164,10 @@ function appendBloodPressureLogs(ss, bpRecords) {
   let sheet = ss.getSheetByName("BloodPressureLog");
   if (!sheet) {
     sheet = ss.insertSheet("BloodPressureLog");
-    sheet.appendRow(["測定日時", "最高血圧(mmHg)", "最低血圧(mmHg)", "測定姿勢", "記録アプリ"]);
+    sheet.appendRow(BLOOD_PRESSURE_HEADERS);
     sheet.setFrozenRows(1);
   }
 
-  // 既存の登録日時を Set に収集 (Date型・文字列両方に対応)
   const existingTimes = new Set();
   const lastRow = sheet.getLastRow();
 
@@ -153,60 +203,133 @@ function appendBloodPressureLogs(ss, bpRecords) {
 }
 
 // -------------------------------------------------------------
-// 3. 食事・栄養ログシート (食事日時+区分+品名で重複排除して追記)
+// 3. 食事・栄養ログシート (直近7日間の範囲洗い替え・重複完全防止)
 // -------------------------------------------------------------
-function appendNutritionLogs(ss, nutritionRecords) {
+function syncNutritionLogs(ss, nutritionRecords) {
   if (!nutritionRecords || nutritionRecords.length === 0) return;
 
   let sheet = ss.getSheetByName("NutritionLog");
   if (!sheet) {
     sheet = ss.insertSheet("NutritionLog");
-    sheet.appendRow([
-      "食事日時", "区分", "品名 / メモ", "エネルギー(kcal)", 
-      "タンパク質(g)", "脂質(g)", "炭水化物(g)", "記録アプリ"
-    ]);
-    sheet.setFrozenRows(1);
   }
+  migrateNutritionLogHeader(sheet);
 
-  const existingKeys = new Set();
-  const lastRow = sheet.getLastRow();
+  // 1. 受信レコードの重複除外 & 行データ生成
+  const uniqueIncomingMap = new Map();
+  let minIncomingDateStr = "9999-99-99";
 
-  if (lastRow > 1) {
-    const values = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-    for (let i = 0; i < values.length; i++) {
-      const timeNorm = normalizeDateTimeString(values[i][0]);
-      const mealType = String(values[i][1]).trim();
-      const name = String(values[i][2]).trim();
-      existingKeys.add(`${timeNorm}_${mealType}_${name}`);
-    }
-  }
-
-  const rowsToAppend = [];
   for (const n of nutritionRecords) {
     const timeStr = formatIsoTime(n.startTime);
+    if (!timeStr) continue;
+
+    const dateStr = timeStr.split(" ")[0]; // "yyyy-MM-dd"
+    if (dateStr < minIncomingDateStr) {
+      minIncomingDateStr = dateStr;
+    }
+
     const mealTypeLabel = getMealTypeLabel(n.mealType);
     const nameStr = (n.name || "").trim();
-    const key = `${timeStr}_${mealTypeLabel}_${nameStr}`;
+    const recordIdStr = (n.recordId || "").trim();
 
-    if (timeStr && !existingKeys.has(key)) {
-      rowsToAppend.push([
-        timeStr,
-        mealTypeLabel,
-        nameStr,
-        n.energyKcal || 0,
-        n.proteinGrams || 0,
-        n.fatGrams || 0,
-        n.carbsGrams || 0,
-        n.sourceApp || ""
-      ]);
-      existingKeys.add(key);
+    // 一意キーの決定（recordId があれば最優先、なければ 日時+区分+品名+カロリー）
+    const key = recordIdStr ? `id_${recordIdStr}` : `${timeStr}_${mealTypeLabel}_${nameStr}_${n.energyKcal}`;
+
+    const row = [
+      timeStr,
+      mealTypeLabel,
+      nameStr,
+      n.energyKcal || 0,
+      n.proteinGrams || 0,
+      n.fatGrams || 0,
+      n.carbsGrams || 0,
+      n.dietaryFiberGrams || 0,
+      n.sugarGrams || 0,
+      n.saltGrams != null ? Math.round(n.saltGrams * 100) / 100 : 0,
+      n.sodiumMg || 0,
+      n.potassiumMg || 0,
+      n.calciumMg || 0,
+      n.magnesiumMg || 0,
+      n.ironMg || 0,
+      n.zincMg || 0,
+      n.vitaminAMcg || 0,
+      n.vitaminDMcg || 0,
+      n.vitaminEMg || 0,
+      n.vitaminKMcg || 0,
+      n.vitaminB1Mg || 0,
+      n.vitaminB2Mg || 0,
+      n.vitaminB6Mg || 0,
+      n.vitaminB12Mcg || 0,
+      n.folateMcg || 0,
+      n.niacinMg || 0,
+      n.pantothenicAcidMg || 0,
+      n.biotinMcg || 0,
+      n.vitaminCMg || 0,
+      n.saturatedFatGrams || 0,
+      n.transFatGrams || 0,
+      n.cholesterolMg || 0,
+      n.caffeineMg || 0,
+      n.sourceApp || "",
+      recordIdStr
+    ];
+
+    uniqueIncomingMap.set(key, row);
+  }
+
+  // 2. 洗い替え対象期間（Cutoff: 最低でも直近7日前〜本日、もしくは受信最古日）
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoStr = Utilities.formatDate(sevenDaysAgo, "Asia/Tokyo", "yyyy-MM-dd");
+  const cutoffDateStr = minIncomingDateStr < sevenDaysAgoStr ? minIncomingDateStr : sevenDaysAgoStr;
+
+  // 3. 既存シートから「洗い替え期間より前の過去ログ」を退避
+  const preservedHistoricalRows = [];
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow > 1) {
+    const existingData = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+    for (let i = 0; i < existingData.length; i++) {
+      const row = existingData[i];
+      const rowDateStr = normalizeDateString(row[0]);
+      // 洗い替え境界日より古いデータのみ保存
+      if (rowDateStr && rowDateStr < cutoffDateStr) {
+        while (row.length < NUTRITION_LOG_HEADERS.length) row.push("");
+        preservedHistoricalRows.push(row.slice(0, NUTRITION_LOG_HEADERS.length));
+      }
     }
   }
 
-  if (rowsToAppend.length > 0) {
-    sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length)
-      .setValues(rowsToAppend);
+  // 4. 過去ログ ＋ 今回の最新データ（洗い替え）を合算
+  const newWindowRows = Array.from(uniqueIncomingMap.values());
+  const allDataRows = preservedHistoricalRows.concat(newWindowRows);
+
+  // 5. 日時昇順ソート
+  allDataRows.sort(function(a, b) {
+    const timeA = String(a[0] || "");
+    const timeB = String(b[0] || "");
+    return timeA.localeCompare(timeB);
+  });
+
+  // 6. シート全体を一括書き換え（重複解消 & 過去分更新）
+  sheet.clearContents();
+  const fullOutput = [NUTRITION_LOG_HEADERS].concat(allDataRows);
+  sheet.getRange(1, 1, fullOutput.length, NUTRITION_LOG_HEADERS.length).setValues(fullOutput);
+  sheet.setFrozenRows(1);
+}
+
+function migrateNutritionLogHeader(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow === 0) {
+    sheet.appendRow(NUTRITION_LOG_HEADERS);
+    sheet.setFrozenRows(1);
+    return;
   }
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < NUTRITION_LOG_HEADERS.length) {
+    sheet.insertColumnsAfter(lastCol, NUTRITION_LOG_HEADERS.length - lastCol);
+  }
+  sheet.getRange(1, 1, 1, NUTRITION_LOG_HEADERS.length).setValues([NUTRITION_LOG_HEADERS]);
+  sheet.setFrozenRows(1);
 }
 
 // -------------------------------------------------------------
@@ -230,7 +353,6 @@ function normalizeDateString(val) {
     return Utilities.formatDate(val, "Asia/Tokyo", "yyyy-MM-dd");
   }
   const s = String(val).trim();
-  // "2026/08/29" -> "2026-08-29"
   return s.replace(/\//g, "-").split(" ")[0];
 }
 
@@ -258,18 +380,16 @@ function responseJson(obj) {
 }
 
 /**
- * 【ユーティリティ】既存の重複行を一括クリーンアップする関数
- * スクリプトエディタからこの関数を選択して「実行」すると、
- * すでに重複してしまった行を自動で綺麗に1行に整理します。
+ * 【ユーティリティ】重複行を手動でクリーンアップする関数
  */
 function cleanAllDuplicateRows() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1. BloodPressureLog の重複削除 (測定日時で判定)
+  // 1. BloodPressureLog の重複削除
   const bpSheet = ss.getSheetByName("BloodPressureLog");
   if (bpSheet && bpSheet.getLastRow() > 2) {
     const data = bpSheet.getDataRange().getValues();
-    const uniqueRows = [data[0]]; // ヘッダー
+    const uniqueRows = [data[0]];
     const seenTimes = new Set();
 
     for (let i = 1; i < data.length; i++) {
@@ -282,24 +402,5 @@ function cleanAllDuplicateRows() {
 
     bpSheet.clearContents();
     bpSheet.getRange(1, 1, uniqueRows.length, uniqueRows[0].length).setValues(uniqueRows);
-  }
-
-  // 2. NutritionLog の重複削除 (食事日時+区分+品名で判定)
-  const nSheet = ss.getSheetByName("NutritionLog");
-  if (nSheet && nSheet.getLastRow() > 2) {
-    const data = nSheet.getDataRange().getValues();
-    const uniqueRows = [data[0]]; // ヘッダー
-    const seenKeys = new Set();
-
-    for (let i = 1; i < data.length; i++) {
-      const key = `${normalizeDateTimeString(data[i][0])}_${String(data[i][1]).trim()}_${String(data[i][2]).trim()}`;
-      if (!seenKeys.has(key)) {
-        uniqueRows.push(data[i]);
-        seenKeys.add(key);
-      }
-    }
-
-    nSheet.clearContents();
-    nSheet.getRange(1, 1, uniqueRows.length, uniqueRows[0].length).setValues(uniqueRows);
   }
 }

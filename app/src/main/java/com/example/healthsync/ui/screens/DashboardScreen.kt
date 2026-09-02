@@ -28,9 +28,9 @@ import com.example.healthsync.ui.theme.EmeraldGreen
 fun DashboardScreen(
     uiState: HealthSyncUiState,
     onRequestPermissions: () -> Unit,
-    onRefresh: () -> Unit,
     onManualSync: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRefresh: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = modifier
@@ -50,39 +50,26 @@ fun DashboardScreen(
             }
         }
 
-        // 2. Quick Action Bar (同期 & 再取得)
+        // 2. Quick Action Bar (クラウドへ即時同期)
         item {
-            Row(
+            Button(
+                onClick = onManualSync,
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                enabled = !uiState.isSyncing && uiState.hasPermissions,
+                shape = RoundedCornerShape(10.dp)
             ) {
-                Button(
-                    onClick = onManualSync,
-                    modifier = Modifier.weight(1f),
-                    enabled = !uiState.isSyncing && uiState.hasPermissions,
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    if (uiState.isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Webhook送信中...")
-                    } else {
-                        Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("クラウドへ即時同期")
-                    }
-                }
-
-                IconButton(
-                    onClick = onRefresh,
-                    enabled = !uiState.isLoading && uiState.hasPermissions
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = "再取得")
+                if (uiState.isSyncing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Webhook送信中...")
+                } else {
+                    Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("クラウドへ即時同期")
                 }
             }
         }
@@ -231,12 +218,29 @@ fun DashboardScreen(
                 "P: %.1fg / F: %.1fg / C: %.1fg".format(p, f, c)
             } else null
 
+            val fiber = summary?.dietaryFiberGrams ?: 0.0
+            val salt = summary?.saltGrams ?: 0.0
+            val sugar = summary?.sugarGrams ?: 0.0
+
             SummaryMetricCard(
                 title = "栄養・食事摂取",
                 value = energyStr,
                 subtitle = pfcStr,
                 icon = Icons.Default.Restaurant,
-                iconColor = Color(0xFF10B981)
+                iconColor = Color(0xFF10B981),
+                extraContent = if (fiber > 0 || salt > 0 || sugar > 0) {
+                    {
+                        val details = mutableListOf<String>()
+                        if (fiber > 0) details.add("食物繊維: %.1fg".format(fiber))
+                        if (sugar > 0) details.add("糖質: %.1fg".format(sugar))
+                        if (salt > 0) details.add("食塩相当量: %.1fg".format(salt))
+                        Text(
+                            text = details.joinToString("  |  "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else null
             )
         }
     }

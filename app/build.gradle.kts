@@ -34,6 +34,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs = freeCompilerArgs + listOf(
+            "-opt-in=androidx.health.connect.client.feature.ExperimentalFeatureAvailabilityApi"
+        )
     }
     buildFeatures {
         compose = true

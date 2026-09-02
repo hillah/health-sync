@@ -43,7 +43,9 @@ class HealthSyncWorker(
         val logTimeStr = DateTimeFormatter.ofPattern("MM/dd HH:mm:ss").format(now)
 
         return try {
-            val todaySummary = healthConnectManager.getHealthSummaryForDay(LocalDate.now())
+            val today = LocalDate.now()
+            val todaySummary = healthConnectManager.getHealthSummaryForDay(today)
+            val recentSummaries = healthConnectManager.getDailyHealthSummaries(days = 7)
             val detailed = if (settings.includeDetailedRecords) {
                 healthConnectManager.getTodayDetailedRecords()
             } else {
@@ -55,6 +57,7 @@ class HealthSyncWorker(
                 deviceId = android.os.Build.MODEL,
                 syncType = "BACKGROUND_WORKER",
                 summary = todaySummary,
+                recentSummaries = recentSummaries,
                 detailedRecords = detailed
             )
 
