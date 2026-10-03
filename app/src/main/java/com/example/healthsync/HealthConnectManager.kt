@@ -341,13 +341,15 @@ class HealthConnectManager(private val context: Context) {
     }
 
     /**
-     * 直近 N 日間（デフォルト7日間）の HealthSummary リストを取得（グラフ用）
+     * 指定終了日までの N 日間の HealthSummary リストを取得（グラフ・集計用）
      */
-    suspend fun getDailyHealthSummaries(days: Int = 7): List<HealthSummary> {
-        val today = LocalDate.now()
+    suspend fun getDailyHealthSummaries(
+        days: Int = 7,
+        endDate: LocalDate = LocalDate.now()
+    ): List<HealthSummary> {
         val list = mutableListOf<HealthSummary>()
         for (i in (days - 1) downTo 0) {
-            val date = today.minusDays(i.toLong())
+            val date = endDate.minusDays(i.toLong())
             list.add(getHealthSummaryForDay(date))
         }
         return list

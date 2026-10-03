@@ -25,9 +25,11 @@ data class HealthSyncUiState(
     val sdkStatus: Int = HealthConnectClient.SDK_UNAVAILABLE,
     val hasPermissions: Boolean = false,
     val isLoading: Boolean = false,
+    val isAnalyticsLoading: Boolean = false,
     val isSyncing: Boolean = false,
     val todaySummary: HealthSummary? = null,
     val weeklySummaries: List<HealthSummary> = emptyList(),
+    val monthlySummaries: List<HealthSummary> = emptyList(), // 直近30日（昨日末尾）
     val detailedRecords: DetailedRecords? = null,
     val lastDataFetchTime: String? = null,
     val errorMessage: String? = null,
@@ -79,26 +81,30 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * 全健康データ（本日サマリー・推移・詳細レコード）を一括読み込み
+     * 全健康データ（本日サマリー・推移・詳細レコード・月間分析）を一括読み込み
      */
     fun fetchAllHealthData() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            _uiState.update { it.copy(isLoading = true, isAnalyticsLoading = true, errorMessage = null) }
             try {
                 val today = LocalDate.now()
+                val yesterday = today.minusDays(1)
                 val summary = healthConnectManager.getHealthSummaryForDay(today)
                 val weekly = healthConnectManager.getDailyHealthSummaries(days = 14)
+                val monthly = healthConnectManager.getDailyHealthSummaries(days = 30, endDate = yesterday)
                 val detailed = healthConnectManager.getTodayDetailedRecords()
 
                 val timeStr = DateTimeFormatter.ofPattern("HH:mm:ss").format(ZonedDateTime.now())
 
-                Log.d("HealthSyncVM", "Fetched all health data. Today steps: ${summary.steps}, sleep: ${summary.sleepDurationMinutes}m")
+                Log.d("HealthSyncVM", "Fetched all health data. Today steps: ${summary.steps}, Monthly: ${monthly.size} days")
 
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isAnalyticsLoading = false,
                         todaySummary = summary,
                         weeklySummaries = weekly,
+                        monthlySummaries = monthly,
                         detailedRecords = detailed,
                         lastDataFetchTime = timeStr
                     )
@@ -108,9 +114,32 @@ class HealthSyncViewModel(application: Application) : AndroidViewModel(applicati
                 _uiState.update {
                     it.copy(
                         isLoading = false,
+                        isAnalyticsLoading = false,
                         errorMessage = e.localizedMessage ?: "健康データの取得に失敗しました"
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * 分析用30日データ（昨日末尾）の単体再取得
+     */
+    fun fetchMonthlyAnalyticsData() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isAnalyticsLoading = true) }
+            try {
+                val yesterday = LocalDate.now().minusDays(1)
+                val monthly = healthConnectManager.getDailyHealthSummaries(days = 30, endDate = yesterday)
+                _uiState.update {
+                    it.copy(
+                        isAnalyticsLoading = false,
+                        monthlySummaries = monthly
+                    )
+                }
+            } catch (e: Exception) {
+                Log.e("HealthSyncVM", "Error fetching monthly analytics", e)
+                _uiState.update { it.copy(isAnalyticsLoading = false) }
             }
         }
     }

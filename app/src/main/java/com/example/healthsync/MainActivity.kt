@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.health.connect.client.PermissionController
+import com.example.healthsync.ui.screens.AnalyticsScreen
 import com.example.healthsync.ui.screens.DashboardScreen
 import com.example.healthsync.ui.screens.SettingsScreen
 import com.example.healthsync.ui.theme.HealthSyncTheme
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
 
 enum class MainTab(val title: String) {
     DASHBOARD("ダッシュボード"),
+    ANALYTICS("分析"),
     SETTINGS("設定・同期")
 }
 
@@ -62,7 +64,11 @@ class MainActivity : ComponentActivity() {
                         TopAppBar(
                             title = {
                                 Text(
-                                    "HealthSync",
+                                    when (selectedTab) {
+                                        MainTab.DASHBOARD -> "HealthSync"
+                                        MainTab.ANALYTICS -> "分析"
+                                        MainTab.SETTINGS -> "設定・同期"
+                                    },
                                     fontWeight = FontWeight.Bold
                                 )
                             },
@@ -75,6 +81,16 @@ class MainActivity : ComponentActivity() {
                                         Icon(
                                             imageVector = Icons.Default.Refresh,
                                             contentDescription = "更新"
+                                        )
+                                    }
+                                } else if (selectedTab == MainTab.ANALYTICS) {
+                                    IconButton(
+                                        onClick = { viewModel.fetchMonthlyAnalyticsData() },
+                                        enabled = uiState.hasPermissions && !uiState.isAnalyticsLoading
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "分析データ更新"
                                         )
                                     }
                                 }
@@ -91,6 +107,12 @@ class MainActivity : ComponentActivity() {
                                 onClick = { selectedTab = MainTab.DASHBOARD },
                                 icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
                                 label = { Text(MainTab.DASHBOARD.title) }
+                            )
+                            NavigationBarItem(
+                                selected = selectedTab == MainTab.ANALYTICS,
+                                onClick = { selectedTab = MainTab.ANALYTICS },
+                                icon = { Icon(Icons.Default.BarChart, contentDescription = null) },
+                                label = { Text(MainTab.ANALYTICS.title) }
                             )
                             NavigationBarItem(
                                 selected = selectedTab == MainTab.SETTINGS,
@@ -117,6 +139,13 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onRefresh = { viewModel.fetchAllHealthData() },
                                     onManualSync = { viewModel.manualExportWebhook() }
+                                )
+                            }
+                            MainTab.ANALYTICS -> {
+                                AnalyticsScreen(
+                                    monthlySummaries = uiState.monthlySummaries,
+                                    isLoading = uiState.isAnalyticsLoading,
+                                    onRefresh = { viewModel.fetchMonthlyAnalyticsData() }
                                 )
                             }
                             MainTab.SETTINGS -> {
